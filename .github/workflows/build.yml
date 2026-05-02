@@ -1,0 +1,52 @@
+name: Build KaraokeAI Studio EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # permette di avviare manualmente
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      - name: Installa Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter
+          pip install openai-whisper
+          pip install pillow
+          pip install numpy
+          pip install pyinstaller
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Compila EXE con PyInstaller
+        run: |
+          pyinstaller `
+            --noconfirm `
+            --onefile `
+            --windowed `
+            --name "KaraokeAI_Studio" `
+            --collect-data whisper `
+            --collect-data customtkinter `
+            --hidden-import whisper `
+            --hidden-import customtkinter `
+            --hidden-import torch `
+            --hidden-import numpy `
+            --hidden-import PIL `
+            main.py
+
+      - name: Carica EXE come artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaraokeAI_Studio_Windows
+          path: dist/KaraokeAI_Studio.exe
+          retention-days: 30
