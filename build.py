@@ -1,67 +1,82 @@
-#!/usr/bin/env python3
-"""
-Build script per KaraokeAI Studio
-Esegui: python build.py
-Output: dist/KaraokeAI_Studio.exe (Windows) o dist/KaraokeAI_Studio (Mac)
-"""
-import subprocess
-import sys
-import os
+name: Build KaraokeAI Studio EXE
 
-def main():
-    print("=== KaraokeAI Studio - Build ===\n")
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-    # 1. Install dependencies
-    print("[1/3] Installazione dipendenze...")
-    deps = [
-        "customtkinter",
-        "openai-whisper",
-        "pillow",
-        "numpy",
-        "ffmpeg-python",
-        "pyinstaller",
-        "torch",          # required by whisper
-        "torchaudio",
-    ]
-    for dep in deps:
-        print(f"  → {dep}")
-        subprocess.run([sys.executable, "-m", "pip", "install", dep, "-q"], check=False)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-    print("\n[2/3] Compilazione con PyInstaller...")
+jobs:
+  build-windows:
+    runs-on: windows-latest
 
-    # PyInstaller command
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm",
-        "--onefile",                  # single exe
-        "--windowed",                 # no console window (GUI app)
-        "--name", "KaraokeAI_Studio",
-        "--add-data", f"main.py{os.pathsep}.",
-        # collect whisper data files
-        "--collect-data", "whisper",
-        "--collect-data", "customtkinter",
-        "--hidden-import", "whisper",
-        "--hidden-import", "customtkinter",
-        "--hidden-import", "torch",
-        "--hidden-import", "numpy",
-        "--hidden-import", "PIL",
-        "main.py"
-    ]
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
 
-    result = subprocess.run(cmd, capture_output=False)
+      - name: Installa Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    if result.returncode == 0:
-        print("\n✅ Build completato!")
-        if sys.platform == "win32":
-            print("   → dist\\KaraokeAI_Studio.exe")
-        else:
-            print("   → dist/KaraokeAI_Studio")
-        print("\nNOTA: Assicurati che ffmpeg sia installato sul PC target:")
-        print("  Windows: https://ffmpeg.org/download.html")
-        print("  Mac:     brew install ffmpeg")
-    else:
-        print("\n❌ Build fallito. Controlla gli errori sopra.")
-        sys.exit(1)
+      - name: Installa dipendenze Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter
+          pip install openai-whisper
+          pip install pillow
+          pip install numpy
+          pip install pyinstaller
+          pip install tiktoken
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-if __name__ == "__main__":
-    main()
+      - name: Scarica FFmpeg per Windows
+        run: |
+          curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_extracted
+          $ffmpegBin = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffprobeBin = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          Copy-Item $ffmpegBin.FullName -Destination "ffmpeg.exe"
+          Copy-Item $ffprobeBin.FullName -Destination "ffprobe.exe"
+          echo "FFmpeg scaricato: $(.\ffmpeg.exe -version 2>&1 | Select-Object -First 1)"
+
+      - name: Compila EXE con PyInstaller
+        run: |
+          pyinstaller `
+            --noconfirm `
+            --onefile `
+            --windowed `
+            --name "KaraokeAI_Studio" `
+            --add-binary "ffmpeg.exe;." `
+            --add-binary "ffprobe.exe;." `
+            --collect-data whisper `
+            --collect-data customtkinter `
+            --collect-all torch `
+            --collect-all tiktoken `
+            --hidden-import whisper `
+            --hidden-import whisper.audio `
+            --hidden-import whisper.model `
+            --hidden-import whisper.tokenizer `
+            --hidden-import whisper.transcribe `
+            --hidden-import whisper.utils `
+            --hidden-import customtkinter `
+            --hidden-import torch `
+            --hidden-import tiktoken `
+            --hidden-import tiktoken_ext `
+            --hidden-import tiktoken_ext.openai_public `
+            --hidden-import numpy `
+            --hidden-import PIL `
+            --hidden-import PIL.Image `
+            --hidden-import tkinter `
+            --hidden-import tkinter.filedialog `
+            --hidden-import tkinter.messagebox `
+            main.py
+
+      - name: Carica EXE come artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaraokeAI_Studio_Windows
+          path: dist/KaraokeAI_Studio.exe
+          retention-days: 30
