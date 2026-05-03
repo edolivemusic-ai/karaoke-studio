@@ -3,7 +3,10 @@ name: Build KaraokeAI Studio EXE
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:   # permette di avviare manualmente
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-windows:
