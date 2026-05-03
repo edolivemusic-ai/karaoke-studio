@@ -10,11 +10,9 @@ import threading
 import json
 import os
 import subprocess
-import tempfile
-import math
+import shutil
 from pathlib import Path
 import whisper
-import numpy as np
 
 def _get_base():
     """Cartella base: accanto all exe se frozen, altrimenti accanto al .py"""
@@ -23,8 +21,37 @@ def _get_base():
     return Path(__file__).parent
 
 def _get_bin(name):
-    local = _get_base() / name
-    return str(local) if local.exists() else name
+    """Restituisce il binario bundled o quello disponibile nel PATH.
+
+    La versione originale cercava sempre `ffmpeg.exe` / `ffprobe.exe`; su macOS/Linux
+    questo impedisce di usare correttamente i binari installati nel sistema.
+    """
+    base = _get_base()
+    candidates = [base / name]
+
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        candidates.append(base / f"{name}.exe")
+    elif os.name != "nt" and name.lower().endswith(".exe"):
+        candidates.append(base / name[:-4])
+
+    for local in candidates:
+        if local.exists():
+            return str(local)
+
+    path_name = shutil.which(name)
+    if path_name:
+        return path_name
+
+    if name.lower().endswith(".exe"):
+        path_name = shutil.which(name[:-4])
+        if path_name:
+            return path_name
+    elif os.name == "nt":
+        path_name = shutil.which(f"{name}.exe")
+        if path_name:
+            return path_name
+
+    return name
 
 def _get_whisper_model_dir():
     """Usa modello bundled se esiste, altrimenti cache standard."""
@@ -33,8 +60,8 @@ def _get_whisper_model_dir():
         return str(bundled)
     return None  # whisper userà la cache di default
 
-FFMPEG  = _get_bin("ffmpeg.exe")
-FFPROBE = _get_bin("ffprobe.exe")
+FFMPEG  = _get_bin("ffmpeg")
+FFPROBE = _get_bin("ffprobe")
 WHISPER_MODEL_DIR = _get_whisper_model_dir()
 
 ctk.set_appearance_mode("dark")
@@ -57,13 +84,37 @@ def fmt_time(sec):
     return f"{m:02d}:{s:02d}.{ms:02d}"
 
 def parse_time(s):
+    """Converte `MM:SS.cc`, `HH:MM:SS.cc` o secondi in float.
+
+    Corregge un bug della versione originale: valori come `01:02.500` venivano
+    interpretati come 67 secondi invece di 62,5 perché `500` era diviso per 100.
+    """
     try:
-        parts = s.strip().replace(",",".").split(":")
-        if len(parts)==2:
-            m,rest=parts; sv,ms=rest.split(".") if "." in rest else (rest,"0")
-            return int(m)*60+int(sv)+int(ms)/100
-        return float(s)
-    except: return 0.0
+        value = str(s).strip().replace(",", ".")
+        if not value:
+            return 0.0
+
+        parts = value.split(":")
+        if len(parts) == 1:
+            return max(0.0, float(parts[0]))
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return max(0.0, int(minutes) * 60 + float(seconds))
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return max(0.0, int(hours) * 3600 + int(minutes) * 60 + float(seconds))
+    except (TypeError, ValueError):
+        pass
+    return 0.0
+
+
+def _ffmpeg_filter_path(path):
+    """Escapa un path per l'uso dentro i filtri FFmpeg/libass."""
+    return Path(path).resolve().as_posix().replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
+
+
+def _ass_filter(path):
+    return f"ass=filename='{_ffmpeg_filter_path(path)}'"
 
 # Gradient presets: list of (r,g,b) color stops
 GRADIENTS = {
@@ -94,13 +145,16 @@ class KaraokeApp(ctk.CTk):
         self.configure(fg_color=BG)
         self.audio_path=None; self.lyrics_lines=[]; self.audio_duration=0.0; self.whisper_model=None
         self.qr_path=None
+        self._pulse_running=False; self._pulse_job=None
         self.model_map={"tiny ⚡ (1-2 min)":"tiny","base (3-5 min)":"base","small (8-12 min)":"small","medium (15+ min)":"medium"}
         self._build_ui()
 
     def _on_close(self):
         self._pulse_running = False
-        try: self.destroy()
-        except: pass
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
         os._exit(0)
 
     def _build_ui(self):
@@ -139,7 +193,7 @@ class KaraokeApp(ctk.CTk):
 
         # ── Step 3: Modello ──
         s3=self._section(frame,"③ Qualità trascrizione")
-        self.model_var=ctk.StringVar(value="tiny (veloce)")
+        self.model_var=ctk.StringVar(value="tiny ⚡ (1-2 min)")
         ctk.CTkOptionMenu(s3,variable=self.model_var,values=list(self.model_map.keys()),
             fg_color=SURFACE,button_color=ACCENT,dropdown_fg_color=CARD,width=200).pack(anchor="w")
 
@@ -266,9 +320,12 @@ class KaraokeApp(ctk.CTk):
         self.audio_label.configure(text=f"✅  {name}",text_color=SUCCESS)
         try:
             r=subprocess.run([FFPROBE,"-v","quiet","-print_format","json","-show_format",path],timeout=10,capture_output=True,text=True)
+            if r.returncode != 0 or not r.stdout.strip():
+                raise RuntimeError(r.stderr.strip() or "ffprobe non ha restituito dati")
             info=json.loads(r.stdout); self.audio_duration=float(info["format"]["duration"])
             self.audio_label.configure(text=f"✅  {name}  [{fmt_time(self.audio_duration)}]")
-        except: self.audio_duration=0.0
+        except Exception:
+            self.audio_duration=0.0
 
     def _load_qr(self):
         path=filedialog.askopenfilename(title="Scegli immagine pubblicitaria",
@@ -312,8 +369,12 @@ class KaraokeApp(ctk.CTk):
 
     def _stop_pulse(self):
         self._pulse_running=False
-        if hasattr(self,"_pulse_job"):
-            self.after_cancel(self._pulse_job)
+        if getattr(self,"_pulse_job",None):
+            try:
+                self.after_cancel(self._pulse_job)
+            except tk.TclError:
+                pass
+            self._pulse_job=None
         self.progress.stop()
         self.progress.configure(mode="determinate")
         self.progress.set(1.0)
@@ -336,16 +397,20 @@ class KaraokeApp(ctk.CTk):
             if not lines:
                 self.after(0,self._stop_pulse)
                 self.after(0,lambda: messagebox.showwarning("Nessun testo","Nessuna voce trovata. Prova un modello più grande.")); return
-            self.lyrics_lines=lines; detected=result.get("language","?")
-            self.after(0,self._stop_pulse)
-            self.after(0,self._render_rows)
-            self.after(0,lambda: self.status_lbl.configure(
-                text=f"✅ {len(lines)} versi trascritti  •  lingua: {detected}",text_color=SUCCESS))
+            detected=result.get("language","?")
+            self.after(0,lambda l=lines,d=detected: self._finish_sync(l,d))
         except Exception as ex:
+            err=str(ex)
             self.after(0,self._stop_pulse)
-            self.after(0,lambda: messagebox.showerror("Errore trascrizione",str(ex)))
+            self.after(0,lambda e=err: messagebox.showerror("Errore trascrizione",e))
         finally:
             self.after(0,lambda: self.sync_btn.configure(state="normal",text="🎙  Avvia Trascrizione AI"))
+
+    def _finish_sync(self,lines,detected):
+        self.lyrics_lines=lines
+        self._stop_pulse()
+        self._render_rows()
+        self.status_lbl.configure(text=f"✅ {len(lines)} versi trascritti  •  lingua: {detected}",text_color=SUCCESS)
 
     def _set_status(self,msg,progress):
         self.after(0,lambda: self.status_lbl.configure(text=msg,text_color=MUTED))
@@ -404,10 +469,7 @@ class KaraokeApp(ctk.CTk):
             )
 
             ass_path=self._build_ass(font_size,ass_color)
-
-            # Build filter chain
-            vf_parts=[f"geq={geq}"]
-            vf_parts.append(f"ass={ass_path}")
+            ass_filter=_ass_filter(ass_path)
 
             # Add QR overlay if present
             if qr_path and os.path.exists(qr_path):
@@ -425,7 +487,7 @@ class KaraokeApp(ctk.CTk):
                     f"[0:v]geq={geq}[bg];"
                     f"[2:v]scale={qr_size}:{qr_size}[qr];"
                     f"[bg][qr]overlay={x_expr}:{y_expr}[bgqr];"
-                    f"[bgqr]ass={ass_path}[v]",
+                    f"[bgqr]{ass_filter}[v]",
                     "-map","[v]","-map","1:a",
                     "-c:v","libx264","-preset","fast","-crf","22",
                     "-c:a","aac","-b:a","192k","-shortest",out_path
@@ -436,21 +498,25 @@ class KaraokeApp(ctk.CTk):
                     "-f","lavfi","-i",f"color=black:s=1920x1080:r=30:d={dur}",
                     "-i",self.audio_path,
                     "-filter_complex",
-                    f"[0:v]geq={geq}[bg];[bg]ass={ass_path}[v]",
+                    f"[0:v]geq={geq}[bg];[bg]{ass_filter}[v]",
                     "-map","[v]","-map","1:a",
                     "-c:v","libx264","-preset","fast","-crf","22",
                     "-c:a","aac","-b:a","192k","-shortest",out_path
                 ]
 
             proc=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
-            os.unlink(ass_path)
+            try:
+                os.unlink(ass_path)
+            except OSError:
+                pass
             if proc.returncode==0:
                 self.after(0,lambda: self.export_status.configure(text="✅ Video salvato!",text_color=SUCCESS))
                 self.after(0,lambda: messagebox.showinfo("Completato",f"Video salvato in:\n{out_path}"))
             else:
                 raise RuntimeError(proc.stderr[-800:])
         except Exception as ex:
-            self.after(0,lambda: messagebox.showerror("Errore esportazione",str(ex)))
+            err=str(ex)
+            self.after(0,lambda e=err: messagebox.showerror("Errore esportazione",e))
             self.after(0,lambda: self.export_status.configure(text="❌ Errore",text_color=DANGER))
         finally:
             self.after(0,lambda: self.export_btn.configure(state="normal",text="⬇  Esporta MP4 1080p"))
@@ -458,7 +524,8 @@ class KaraokeApp(ctk.CTk):
     def _build_ass(self,font_size,primary_color):
         # Salva in cartella senza spazi per compatibilità FFmpeg
         import uuid
-        safe_dir = Path(os.environ.get("TEMP", os.environ.get("TMP", "C:\\Temp")))
+        safe_dir = Path(os.environ.get("TEMP") or os.environ.get("TMP") or os.environ.get("TMPDIR") or _get_base())
+        safe_dir.mkdir(parents=True, exist_ok=True)
         safe_path = safe_dir / f"karaoke_{uuid.uuid4().hex[:8]}.ass"
         tmp=open(safe_path,"w",encoding="utf-8")
         tmp.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nCollisions: Normal\n\n")
@@ -469,7 +536,10 @@ class KaraokeApp(ctk.CTk):
             h=int(sec)//3600; m=(int(sec)%3600)//60; s=int(sec)%60; cs=int((sec-int(sec))*100)
             return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
         for line in self.lyrics_lines:
-            text=line["text"].replace("\n","\\N").replace("{","{{").replace("}","}}")
+            text=(line["text"].replace("\\", r"\\")
+                               .replace("\n","\\N")
+                               .replace("{", r"\{")
+                               .replace("}", r"\}"))
             tmp.write(f"Dialogue: 0,{at(line['start'])},{at(line['end'])},Default,,0,0,0,,{text}\n")
         tmp.close(); return str(safe_path)
 
