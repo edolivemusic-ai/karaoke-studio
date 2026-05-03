@@ -88,8 +88,11 @@ class KaraokeApp(ctk.CTk):
         self._build_ui()
 
     def _on_close(self):
-        import sys
-        self.destroy()
+        import sys, os, signal
+        self._pulse_running = False
+        try: self.destroy()
+        except: pass
+        os.kill(os.getpid(), signal.SIGTERM)
         sys.exit(0)
 
     def _build_ui(self):
@@ -462,9 +465,10 @@ class KaraokeApp(ctk.CTk):
         tmp.close(); return tmp.name
 
 def main():
+    import os, signal
     app=KaraokeApp()
     app.mainloop()
-    import sys; sys.exit(0)
+    os.kill(os.getpid(), signal.SIGTERM)
 
 if __name__=="__main__":
     main()
