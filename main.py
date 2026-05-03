@@ -456,7 +456,11 @@ class KaraokeApp(ctk.CTk):
             self.after(0,lambda: self.export_btn.configure(state="normal",text="⬇  Esporta MP4 1080p"))
 
     def _build_ass(self,font_size,primary_color):
-        tmp=tempfile.NamedTemporaryFile(suffix=".ass",delete=False,mode="w",encoding="utf-8")
+        # Salva in cartella senza spazi per compatibilità FFmpeg
+        import uuid
+        safe_dir = Path(os.environ.get("TEMP", os.environ.get("TMP", "C:\\Temp")))
+        safe_path = safe_dir / f"karaoke_{uuid.uuid4().hex[:8]}.ass"
+        tmp=open(safe_path,"w",encoding="utf-8")
         tmp.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nCollisions: Normal\n\n")
         tmp.write("[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n")
         tmp.write(f"Style: Default,Arial,{font_size},{primary_color},&H00C084FC,&H00000000,&HA0000000,-1,0,0,0,100,100,2,0,1,4,2,2,80,80,90,1\n\n")
@@ -467,7 +471,7 @@ class KaraokeApp(ctk.CTk):
         for line in self.lyrics_lines:
             text=line["text"].replace("\n","\\N").replace("{","{{").replace("}","}}")
             tmp.write(f"Dialogue: 0,{at(line['start'])},{at(line['end'])},Default,,0,0,0,,{text}\n")
-        tmp.close(); return tmp.name
+        tmp.close(); return str(safe_path)
 
 def main():
     app=KaraokeApp()
