@@ -1,3 +1,8 @@
+import sys as _sys, io as _io
+# Fix critico PyInstaller --windowed: stdout/stderr sono None prima di qualsiasi import
+if _sys.stdout is None: _sys.stdout = _io.StringIO()
+if _sys.stderr is None: _sys.stderr = _io.StringIO()
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -10,8 +15,6 @@ import math
 from pathlib import Path
 import whisper
 import numpy as np
-
-import sys as _sys
 
 def _get_bin(name):
     """Trova ffmpeg/ffprobe dentro l exe oppure nel sistema."""
@@ -318,9 +321,6 @@ class KaraokeApp(ctk.CTk):
             lang_map={"Auto":None,"Italiano":"it","English":"en","Español":"es","Français":"fr",
                 "Deutsch":"de","Português":"pt","日本語":"ja","한국어":"ko","中文":"zh","Русский":"ru","العربية":"ar"}
             language=lang_map.get(self.lang_var.get(),None)
-            import sys,io
-            if sys.stdout is None: sys.stdout=io.StringIO()
-            if sys.stderr is None: sys.stderr=io.StringIO()
             opts=dict(word_timestamps=True,verbose=None)
             if language: opts["language"]=language
             result=self.whisper_model.transcribe(self.audio_path,**opts)
