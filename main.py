@@ -182,7 +182,10 @@ class KaraokeApp(ctk.CTk):
                 "Deutsch":"de","Português":"pt","日本語":"ja","한국어":"ko","中文":"zh","Русский":"ru","العربية":"ar"}
             language=lang_map.get(self.lang_var.get(),None)
             self._set_status("Trascrizione audio in corso... (1-3 minuti)",0.15)
-            opts=dict(word_timestamps=True,verbose=False)
+            import sys, io
+            if sys.stdout is None: sys.stdout = io.StringIO()
+            if sys.stderr is None: sys.stderr = io.StringIO()
+            opts=dict(word_timestamps=True, verbose=None)
             if language: opts["language"]=language
             result=self.whisper_model.transcribe(self.audio_path,**opts)
             self._set_status("Costruzione versi...",0.85)
