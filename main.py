@@ -68,7 +68,7 @@ class KaraokeApp(ctk.CTk):
         self.configure(fg_color=BG)
         self.audio_path=None; self.lyrics_lines=[]; self.audio_duration=0.0; self.whisper_model=None
         self.qr_path=None
-        self.model_map={"tiny (veloce)":"tiny","base (consigliato)":"base","small (preciso)":"small","medium (lento)":"medium"}
+        self.model_map={"tiny ⚡ (1-2 min)":"tiny","base (3-5 min)":"base","small (8-12 min)":"small","medium (15+ min)":"medium"}
         self._build_ui()
 
     def _on_close(self):
@@ -90,8 +90,10 @@ class KaraokeApp(ctk.CTk):
         return outer
 
     def _left_panel(self,parent):
-        frame=ctk.CTkFrame(parent,fg_color=CARD,corner_radius=14)
-        frame.grid(row=0,column=0,sticky="nsew",padx=(0,8))
+        outer=ctk.CTkFrame(parent,fg_color=CARD,corner_radius=14)
+        outer.grid(row=0,column=0,sticky="nsew",padx=(0,8))
+        frame=ctk.CTkScrollableFrame(outer,fg_color="transparent",scrollbar_button_color=ACCENT)
+        frame.pack(fill="both",expand=True,padx=0,pady=0)
 
         # ── Step 1: Audio ──
         s1=self._section(frame,"① Carica la canzone")
@@ -110,7 +112,7 @@ class KaraokeApp(ctk.CTk):
 
         # ── Step 3: Modello ──
         s3=self._section(frame,"③ Qualità trascrizione")
-        self.model_var=ctk.StringVar(value="base (consigliato)")
+        self.model_var=ctk.StringVar(value="tiny (veloce)")
         ctk.CTkOptionMenu(s3,variable=self.model_var,values=list(self.model_map.keys()),
             fg_color=SURFACE,button_color=ACCENT,dropdown_fg_color=CARD,width=200).pack(anchor="w")
 
@@ -253,37 +255,70 @@ class KaraokeApp(ctk.CTk):
         if not self.audio_path:
             messagebox.showwarning("Attenzione","Prima carica un file audio!"); return
         self.sync_btn.configure(state="disabled",text="⏳  Elaborazione in corso...")
-        self.progress.set(0); self.lyrics_lines=[]; self._render_rows()
+        self.progress.configure(mode="indeterminate")
+        self.progress.start()
+        self.lyrics_lines=[]; self._render_rows()
+        self._pulse_msgs=["Caricamento modello AI...","Analisi audio in corso...","Riconoscimento vocale...","Allineamento testo...","Quasi pronto..."]
+        self._pulse_idx=0
+        self._pulse_running=True
+        self._pulse_tick()
         threading.Thread(target=self._sync_worker,daemon=True).start()
+
+    def _pulse_tick(self):
+        if not self._pulse_running: return
+        model=self.model_var.get()
+        dur=self.audio_duration or 0
+        # Stima tempo in minuti
+        speed={"tiny ⚡ (1-2 min)":32,"base (3-5 min)":16,"small (8-12 min)":8,"medium (15+ min)":4}
+        rtf=speed.get(model,16)
+        est=int(dur/rtf/60)+1 if dur>0 else "?"
+        msgs=[
+            f"🎙 Analisi audio... (stima: ~{est} min)",
+            "🔍 Riconoscimento vocale in corso...",
+            "📝 Trascrizione testo...",
+            "⏱ Allineamento tempi...",
+            f"🔄 Elaborazione... (~{est} min totali)",
+        ]
+        self.status_lbl.configure(text=msgs[self._pulse_idx % len(msgs)],text_color=MUTED)
+        self._pulse_idx+=1
+        self._pulse_job=self.after(2500,self._pulse_tick)
+
+    def _stop_pulse(self):
+        self._pulse_running=False
+        if hasattr(self,"_pulse_job"):
+            self.after_cancel(self._pulse_job)
+        self.progress.stop()
+        self.progress.configure(mode="determinate")
+        self.progress.set(1.0)
 
     def _sync_worker(self):
         try:
             model_name=self.model_map.get(self.model_var.get(),"base")
-            self._set_status(f"Caricamento modello '{model_name}'...",0.05)
             if self.whisper_model is None or getattr(self.whisper_model,"_name","")!=model_name:
                 self.whisper_model=whisper.load_model(model_name); self.whisper_model._name=model_name
             lang_map={"Auto":None,"Italiano":"it","English":"en","Español":"es","Français":"fr",
                 "Deutsch":"de","Português":"pt","日本語":"ja","한국어":"ko","中文":"zh","Русский":"ru","العربية":"ar"}
             language=lang_map.get(self.lang_var.get(),None)
-            self._set_status("Trascrizione in corso... (1-3 min)",0.15)
             import sys,io
             if sys.stdout is None: sys.stdout=io.StringIO()
             if sys.stderr is None: sys.stderr=io.StringIO()
             opts=dict(word_timestamps=True,verbose=None)
             if language: opts["language"]=language
             result=self.whisper_model.transcribe(self.audio_path,**opts)
-            self._set_status("Costruzione versi...",0.85)
             lines=[]
             for seg in result.get("segments",[]):
                 text=seg["text"].strip()
                 if text: lines.append({"text":text,"start":round(seg["start"],2),"end":round(seg["end"],2)})
             if not lines:
+                self.after(0,self._stop_pulse)
                 self.after(0,lambda: messagebox.showwarning("Nessun testo","Nessuna voce trovata. Prova un modello più grande.")); return
             self.lyrics_lines=lines; detected=result.get("language","?")
+            self.after(0,self._stop_pulse)
             self.after(0,self._render_rows)
             self.after(0,lambda: self.status_lbl.configure(
-                text=f"✅ {len(lines)} versi  •  lingua: {detected}",text_color=SUCCESS))
+                text=f"✅ {len(lines)} versi trascritti  •  lingua: {detected}",text_color=SUCCESS))
         except Exception as ex:
+            self.after(0,self._stop_pulse)
             self.after(0,lambda: messagebox.showerror("Errore trascrizione",str(ex)))
         finally:
             self.after(0,lambda: self.sync_btn.configure(state="normal",text="🎙  Avvia Trascrizione AI"))
