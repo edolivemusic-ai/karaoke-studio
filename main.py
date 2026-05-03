@@ -11,6 +11,22 @@ from pathlib import Path
 import whisper
 import numpy as np
 
+import sys as _sys
+
+def _get_bin(name):
+    """Trova ffmpeg/ffprobe dentro l exe oppure nel sistema."""
+    if getattr(_sys, "frozen", False):
+        base = Path(_sys.executable).parent
+    else:
+        base = Path(__file__).parent
+    local = base / name
+    if local.exists():
+        return str(local)
+    return name  # fallback: cerca nel PATH di sistema
+
+FFMPEG  = _get_bin("ffmpeg.exe")
+FFPROBE = _get_bin("ffprobe.exe")
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -238,7 +254,7 @@ class KaraokeApp(ctk.CTk):
         self.audio_path=path; name=Path(path).name
         self.audio_label.configure(text=f"✅  {name}",text_color=SUCCESS)
         try:
-            r=subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",path],capture_output=True,text=True)
+            r=subprocess.run([FFPROBE,"-v","quiet","-print_format","json","-show_format",path],capture_output=True,text=True)
             info=json.loads(r.stdout); self.audio_duration=float(info["format"]["duration"])
             self.audio_label.configure(text=f"✅  {name}  [{fmt_time(self.audio_duration)}]")
         except: self.audio_duration=0.0
@@ -393,7 +409,7 @@ class KaraokeApp(ctk.CTk):
                 y_expr=y_expr.replace("{s}",str(qr_size)).replace("W","main_w").replace("H","main_h")
 
                 cmd=[
-                    "ffmpeg","-y",
+                    FFMPEG,"-y",
                     "-f","lavfi","-i",f"color=black:s=1920x1080:r=30:d={dur}",
                     "-i",self.audio_path,
                     "-i",qr_path,
@@ -408,7 +424,7 @@ class KaraokeApp(ctk.CTk):
                 ]
             else:
                 cmd=[
-                    "ffmpeg","-y",
+                    FFMPEG,"-y",
                     "-f","lavfi","-i",f"color=black:s=1920x1080:r=30:d={dur}",
                     "-i",self.audio_path,
                     "-filter_complex",
