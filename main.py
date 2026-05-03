@@ -230,6 +230,15 @@ class KaraokeApp(ctk.CTk):
         ctk.CTkOptionMenu(rc,variable=self.txt_color_var,values=["bianco","giallo","ciano","rosa"],
             fg_color=SURFACE,button_color=ACCENT,dropdown_fg_color=CARD,width=170).pack(side="left",padx=6)
 
+        # Risoluzione
+        rr=ctk.CTkFrame(s5,fg_color="transparent"); rr.pack(fill="x",pady=(0,4))
+        ctk.CTkLabel(rr,text="Qualità:",text_color=MUTED,width=80).pack(side="left")
+        self.res_var=ctk.StringVar(value="1080p")
+        self.res_map={"1080p":(1920,1080),"720p":(1280,720),"480p":(854,480),"320p":(480,320)}
+        ctk.CTkOptionMenu(rr,variable=self.res_var,values=list(self.res_map.keys()),
+            fg_color=SURFACE,button_color=ACCENT,dropdown_fg_color=CARD,width=170,
+            command=lambda _: self.export_btn.configure(text=f"⬇  Esporta MP4 {self.res_var.get()}")).pack(side="left",padx=6)
+
         # QR code
         sq=self._section(frame,"🖼  Logo / Immagine pub (opzionale)")
         self.qr_label=ctk.CTkLabel(sq,text="Nessuna immagine caricata",text_color=MUTED,font=ctk.CTkFont(size=11),wraplength=260)
@@ -445,16 +454,25 @@ class KaraokeApp(ctk.CTk):
         if not out_path: return
         self.export_btn.configure(state="disabled",text="⏳  Esportazione...")
         self.export_status.configure(text="Generazione video...",text_color=MUTED)
+        
+        res_name = self.res_var.get()
+        width, height = self.res_map.get(res_name, (1920, 1080))
+        
         params=(out_path, self.grad_var.get(), int(self.font_size.get()),
                 self.txt_color_var.get(), self.qr_path,
-                int(self.qr_size.get()), self.qr_pos_var.get())
+                int(self.qr_size.get()), self.qr_pos_var.get(), width, height)
         threading.Thread(target=self._export_worker,args=params,daemon=True).start()
 
-    def _export_worker(self,out_path,grad_name,font_size,txt_color,qr_path,qr_size,qr_pos):
+    def _export_worker(self,out_path,grad_name,font_size,txt_color,qr_path,qr_size,qr_pos,width,height):
         try:
             dur=self.audio_duration or 300.0
             color_map={"bianco":"&H00FFFFFF","giallo":"&H0000FFFF","ciano":"&H00FFFF00","rosa":"&H00FF80FF"}
             ass_color=color_map.get(txt_color,"&H00FFFFFF")
+            
+            # Adatta la dimensione del font alla risoluzione (base 1080p)
+            scale_factor = height / 1080.0
+            scaled_font_size = int(font_size * scale_factor)
+            scaled_qr_size = int(qr_size * scale_factor)
 
             # Build gradient background video using ffmpeg lavfi
             stops=GRADIENTS.get(grad_name,[(80,0,160),(0,20,180)])
@@ -468,7 +486,7 @@ class KaraokeApp(ctk.CTk):
                 f"r='({r1}+(({r2}-{r1})*Y/H))':g='({g1}+(({g2}-{g1})*Y/H))':b='({b1}+(({b2}-{b1})*Y/H))'"
             )
 
-            ass_path=self._build_ass(font_size,ass_color)
+            ass_path=self._build_ass(font_size,ass_color,width,height)
             ass_filter=_ass_filter(ass_path)
 
             # Add QR overlay if present
@@ -480,13 +498,13 @@ class KaraokeApp(ctk.CTk):
 
                 cmd=[
                     FFMPEG,"-y",
-                    "-f","lavfi","-i",f"color=black:s=1920x1080:r=30:d={dur}",
+                    "-f","lavfi","-i",f"color=black:s={width}x{height}:r=30:d={dur}",
                     "-i",self.audio_path,
                     "-i",qr_path,
                     "-filter_complex",
                     f"[0:v]geq={geq}[bg];"
-                    f"[2:v]scale={qr_size}:{qr_size}[qr];"
-                    f"[bg][qr]overlay={x_expr}:{y_expr}[bgqr];"
+                    f"[2:v]scale={scaled_qr_size}:{scaled_qr_size}[qr];"
+                    f"[bg][qr]overlay={x_expr.replace(str(qr_size), str(scaled_qr_size))}:{y_expr.replace(str(qr_size), str(scaled_qr_size))}[bgqr];"
                     f"[bgqr]{ass_filter}[v]",
                     "-map","[v]","-map","1:a",
                     "-c:v","libx264","-preset","fast","-crf","22",
@@ -495,7 +513,7 @@ class KaraokeApp(ctk.CTk):
             else:
                 cmd=[
                     FFMPEG,"-y",
-                    "-f","lavfi","-i",f"color=black:s=1920x1080:r=30:d={dur}",
+                    "-f","lavfi","-i",f"color=black:s={width}x{height}:r=30:d={dur}",
                     "-i",self.audio_path,
                     "-filter_complex",
                     f"[0:v]geq={geq}[bg];[bg]{ass_filter}[v]",
@@ -519,16 +537,16 @@ class KaraokeApp(ctk.CTk):
             self.after(0,lambda e=err: messagebox.showerror("Errore esportazione",e))
             self.after(0,lambda: self.export_status.configure(text="❌ Errore",text_color=DANGER))
         finally:
-            self.after(0,lambda: self.export_btn.configure(state="normal",text="⬇  Esporta MP4 1080p"))
+            self.after(0,lambda: self.export_btn.configure(state="normal",text=f"⬇  Esporta MP4 {self.res_var.get()}"))
 
-    def _build_ass(self,font_size,primary_color):
+    def _build_ass(self,font_size,primary_color,width,height):
         # Salva in cartella senza spazi per compatibilità FFmpeg
         import uuid
         safe_dir = Path(os.environ.get("TEMP") or os.environ.get("TMP") or os.environ.get("TMPDIR") or _get_base())
         safe_dir.mkdir(parents=True, exist_ok=True)
         safe_path = safe_dir / f"karaoke_{uuid.uuid4().hex[:8]}.ass"
         tmp=open(safe_path,"w",encoding="utf-8")
-        tmp.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nCollisions: Normal\n\n")
+        tmp.write(f"[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\nCollisions: Normal\n\n")
         tmp.write("[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n")
         tmp.write(f"Style: Default,Arial,{font_size},{primary_color},&H00C084FC,&H00000000,&HA0000000,-1,0,0,0,100,100,2,0,1,4,2,2,80,80,90,1\n\n")
         tmp.write("[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n")
