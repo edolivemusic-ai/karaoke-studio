@@ -16,19 +16,26 @@ from pathlib import Path
 import whisper
 import numpy as np
 
-def _get_bin(name):
-    """Trova ffmpeg/ffprobe dentro l exe oppure nel sistema."""
+def _get_base():
+    """Cartella base: accanto all exe se frozen, altrimenti accanto al .py"""
     if getattr(_sys, "frozen", False):
-        base = Path(_sys.executable).parent
-    else:
-        base = Path(__file__).parent
-    local = base / name
-    if local.exists():
-        return str(local)
-    return name  # fallback: cerca nel PATH di sistema
+        return Path(_sys.executable).parent
+    return Path(__file__).parent
+
+def _get_bin(name):
+    local = _get_base() / name
+    return str(local) if local.exists() else name
+
+def _get_whisper_model_dir():
+    """Usa modello bundled se esiste, altrimenti cache standard."""
+    bundled = _get_base() / "whisper_models"
+    if bundled.exists() and any(bundled.iterdir()):
+        return str(bundled)
+    return None  # whisper userà la cache di default
 
 FFMPEG  = _get_bin("ffmpeg.exe")
 FFPROBE = _get_bin("ffprobe.exe")
+WHISPER_MODEL_DIR = _get_whisper_model_dir()
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -317,7 +324,7 @@ class KaraokeApp(ctk.CTk):
         try:
             model_name=self.model_map.get(self.model_var.get(),"base")
             if self.whisper_model is None or getattr(self.whisper_model,"_name","")!=model_name:
-                self.whisper_model=whisper.load_model(model_name); self.whisper_model._name=model_name
+                self.whisper_model=whisper.load_model(model_name, download_root=WHISPER_MODEL_DIR); self.whisper_model._name=model_name
             lang_map={"Auto":None,"Italiano":"it","English":"en","Español":"es","Français":"fr",
                 "Deutsch":"de","Português":"pt","日本語":"ja","한국어":"ko","中文":"zh","Русский":"ru","العربية":"ar"}
             language=lang_map.get(self.lang_var.get(),None)
