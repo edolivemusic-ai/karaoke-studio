@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout codice
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Installa Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: 'pip'
