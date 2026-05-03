@@ -64,11 +64,17 @@ class KaraokeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("KaraokeAI Studio"); self.geometry("1280x860"); self.minsize(960,700)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.configure(fg_color=BG)
         self.audio_path=None; self.lyrics_lines=[]; self.audio_duration=0.0; self.whisper_model=None
         self.qr_path=None
         self.model_map={"tiny (veloce)":"tiny","base (consigliato)":"base","small (preciso)":"small","medium (lento)":"medium"}
         self._build_ui()
+
+    def _on_close(self):
+        import sys
+        self.destroy()
+        sys.exit(0)
 
     def _build_ui(self):
         hdr=ctk.CTkFrame(self,fg_color=SURFACE,corner_radius=0,height=58); hdr.pack(fill="x",side="top"); hdr.pack_propagate(False)
@@ -405,7 +411,9 @@ class KaraokeApp(ctk.CTk):
         tmp.close(); return tmp.name
 
 def main():
-    app=KaraokeApp(); app.mainloop()
+    app=KaraokeApp()
+    app.mainloop()
+    import sys; sys.exit(0)
 
 if __name__=="__main__":
     main()
