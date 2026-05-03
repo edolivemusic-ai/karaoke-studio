@@ -32,6 +32,11 @@ jobs:
           pip install tiktoken
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
+      - name: Scarica modello Whisper tiny
+        run: |
+          python -c "import whisper; whisper.load_model('tiny')"
+          echo "Modello tiny scaricato"
+
       - name: Scarica FFmpeg per Windows
         run: |
           curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
@@ -40,7 +45,19 @@ jobs:
           $ffprobeBin = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
           Copy-Item $ffmpegBin.FullName -Destination "ffmpeg.exe"
           Copy-Item $ffprobeBin.FullName -Destination "ffprobe.exe"
-          echo "FFmpeg scaricato: $(.\ffmpeg.exe -version 2>&1 | Select-Object -First 1)"
+
+      - name: Copia modello Whisper nella cartella progetto
+        run: |
+          python -c "
+          import os, shutil, whisper
+          model_dir = os.path.join(os.path.expanduser('~'), '.cache', 'whisper')
+          dest = 'whisper_models'
+          os.makedirs(dest, exist_ok=True)
+          for f in os.listdir(model_dir):
+              if 'tiny' in f:
+                  shutil.copy(os.path.join(model_dir, f), os.path.join(dest, f))
+                  print(f'Copiato: {f}')
+          "
 
       - name: Compila EXE con PyInstaller
         run: |
@@ -51,6 +68,7 @@ jobs:
             --name "KaraokeAI_Studio" `
             --add-binary "ffmpeg.exe;." `
             --add-binary "ffprobe.exe;." `
+            --add-data "whisper_models;whisper_models" `
             --collect-data whisper `
             --collect-data customtkinter `
             --collect-all torch `
