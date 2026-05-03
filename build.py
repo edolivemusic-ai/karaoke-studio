@@ -14,39 +14,31 @@ jobs:
 
     steps:
       - name: Checkout codice
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Installa Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          cache: 'pip'
 
       - name: Installa dipendenze Python
         run: |
           python -m pip install --upgrade pip
-          pip install customtkinter
-          pip install openai-whisper
-          pip install pillow
-          pip install numpy
-          pip install pyinstaller
-          pip install tiktoken
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Scarica modello Whisper tiny
         run: |
           python -c "import whisper; whisper.load_model('tiny')"
-          echo "Modello tiny scaricato"
 
-      - name: Scarica FFmpeg per Windows
+      - name: Scarica FFmpeg
         run: |
           curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
-          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_extracted
-          $ffmpegBin = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          $ffprobeBin = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
-          Copy-Item $ffmpegBin.FullName -Destination "ffmpeg.exe"
-          Copy-Item $ffprobeBin.FullName -Destination "ffprobe.exe"
+          Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force
+          Get-ChildItem -Path "ffmpeg-master-latest-win64-gpl" -Recurse -Filter "ffmpeg.exe" | Copy-Item -Destination "ffmpeg.exe" -Force
+          Get-ChildItem -Path "ffmpeg-master-latest-win64-gpl" -Recurse -Filter "ffprobe.exe" | Copy-Item -Destination "ffprobe.exe" -Force
 
-      - name: Copia modello Whisper nella cartella progetto
+      - name: Copia modelli Whisper
         run: |
           python -c "
           import os, shutil, whisper
@@ -54,9 +46,9 @@ jobs:
           dest = 'whisper_models'
           os.makedirs(dest, exist_ok=True)
           for f in os.listdir(model_dir):
-              if 'tiny' in f:
-                  shutil.copy(os.path.join(model_dir, f), os.path.join(dest, f))
-                  print(f'Copiato: {f}')
+              if 'tiny' in f.lower():
+                  shutil.copy2(os.path.join(model_dir, f), os.path.join(dest, f))
+                  print('Copiato:', f)
           "
 
       - name: Compila EXE con PyInstaller
@@ -69,27 +61,21 @@ jobs:
             --add-binary "ffmpeg.exe;." `
             --add-binary "ffprobe.exe;." `
             --add-data "whisper_models;whisper_models" `
-            --collect-data whisper `
-            --collect-data customtkinter `
             --collect-all torch `
+            --collect-all torchaudio `
+            --collect-all whisper `
+            --collect-all customtkinter `
             --collect-all tiktoken `
             --hidden-import whisper `
-            --hidden-import whisper.audio `
-            --hidden-import whisper.model `
-            --hidden-import whisper.tokenizer `
             --hidden-import whisper.transcribe `
-            --hidden-import whisper.utils `
+            --hidden-import whisper.model `
+            --hidden-import whisper.decoding `
             --hidden-import customtkinter `
             --hidden-import torch `
             --hidden-import tiktoken `
-            --hidden-import tiktoken_ext `
-            --hidden-import tiktoken_ext.openai_public `
             --hidden-import numpy `
-            --hidden-import PIL `
             --hidden-import PIL.Image `
-            --hidden-import tkinter `
             --hidden-import tkinter.filedialog `
-            --hidden-import tkinter.messagebox `
             main.py
 
       - name: Carica EXE come artifact
