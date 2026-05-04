@@ -1,4 +1,4 @@
-name: Build KaraokeAI Studio PRO
+name: Build KaraokeAI Studio EXE
 
 on:
   push:
@@ -8,43 +8,42 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout codice
         uses: actions/checkout@v4
 
-      - name: Python Setup
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Installa Dipendenze
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install customtkinter openai-whisper pyinstaller pillow numpy tiktoken
+          pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
 
-      - name: Fetch FFmpeg Binaries
+      - name: Scarica FFmpeg
         shell: pwsh
         run: |
-          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
-          Expand-Archive ff.zip -DestinationPath temp
-          $bin = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          Copy-Item $bin.FullName -Destination "ffmpeg.exe"
-          $prob = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
-          Copy-Item $prob.FullName -Destination "ffprobe.exe"
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath tmp
+          $f = Get-ChildItem -Path "tmp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $f.FullName -Destination "ffmpeg.exe"
 
-      - name: PyInstaller Build
+      - name: Compilazione EXE
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --name "KaraokeAI_Studio_Pro" `
             --add-binary "ffmpeg.exe;." `
-            --add-binary "ffprobe.exe;." `
             --collect-all whisper `
             --collect-all customtkinter `
             --hidden-import "tiktoken_ext.openai_public" `
+            --hidden-import "tiktoken_ext" `
             main.py
 
-      - name: Upload Artifact
+      - name: Upload Risultato
         uses: actions/upload-artifact@v4
         with:
-          name: Windows_Executable
+          name: KaraokeAI_Studio_Windows
           path: dist/KaraokeAI_Studio_Pro.exe
