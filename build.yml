@@ -1,4 +1,4 @@
-name: Build KaraokeAI Studio EXE
+name: Build KaraokeAI Studio PRO
 
 on:
   push:
@@ -8,42 +8,49 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout codice
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: 'pip'
 
-      - name: Installa Dipendenze
+      - name: Install Dependencies
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
 
-      - name: Scarica FFmpeg
+      - name: Download FFmpeg & FFprobe
         shell: pwsh
         run: |
-          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
-          Expand-Archive ffmpeg.zip -DestinationPath tmp
-          $f = Get-ChildItem -Path "tmp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          Copy-Item $f.FullName -Destination "ffmpeg.exe"
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
+          Expand-Archive ff.zip -DestinationPath temp
+          $ffmpeg = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          Copy-Item $ffmpeg.FullName -Destination "ffmpeg.exe"
+          Copy-Item $ffprobe.FullName -Destination "ffprobe.exe"
 
-      - name: Compilazione EXE
+      - name: Pre-Download Whisper Model
+        run: |
+          python -c "import whisper; whisper.load_model('base', download_root='whisper_models')"
+
+      - name: Build EXE
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --name "KaraokeAI_Studio_Pro" `
             --add-binary "ffmpeg.exe;." `
+            --add-binary "ffprobe.exe;." `
+            --add-data "whisper_models;whisper_models" `
             --collect-all whisper `
             --collect-all customtkinter `
             --hidden-import "tiktoken_ext.openai_public" `
-            --hidden-import "tiktoken_ext" `
             main.py
 
-      - name: Upload Risultato
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeAI_Studio_Windows
+          name: KaraokeAI_Studio_Pro
           path: dist/KaraokeAI_Studio_Pro.exe
