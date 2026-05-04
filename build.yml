@@ -1,58 +1,55 @@
-name: Build KaraokeAI Studio PRO
+name: Build KaraokeAI Studio EXE
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout codice
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Installa Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Installa Dipendenze
+      - name: Installa dipendenze
         run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter
+          pip install openai-whisper
+          pip install pillow
+          pip install numpy
+          pip install pyinstaller
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
 
-      - name: Download FFmpeg & FFprobe
-        shell: pwsh
+      - name: Compila EXE con PyInstaller
         run: |
-          $u = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-          Invoke-WebRequest -Uri $u -OutFile ff.zip
-          Expand-Archive ff.zip -DestinationPath temp
-          $f = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          $p = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
-          Copy-Item $f.FullName -Destination "ffmpeg.exe"
-          Copy-Item $p.FullName -Destination "ffprobe.exe"
-
-      - name: Pre-Download Modello Whisper
-        run: |
-          python -c "import whisper; whisper.load_model('base', download_root='whisper_models')"
-
-      - name: Build EXE Definitivo
-        shell: pwsh
-        run: |
-          pyinstaller --noconfirm --onefile --windowed `
-            --name "KaraokeAI_Studio_Pro" `
-            --add-binary "ffmpeg.exe;." `
-            --add-binary "ffprobe.exe;." `
-            --add-data "whisper_models;whisper_models" `
-            --collect-all whisper `
-            --collect-all customtkinter `
-            --hidden-import "tiktoken_ext.openai_public" `
-            --hidden-import "tiktoken_ext" `
+          pyinstaller `
+            --noconfirm `
+            --onefile `
+            --windowed `
+            --name "KaraokeAI_Studio" `
+            --collect-data whisper `
+            --collect-data customtkinter `
+            --hidden-import whisper `
+            --hidden-import customtkinter `
+            --hidden-import torch `
+            --hidden-import numpy `
+            --hidden-import PIL `
             main.py
 
-      - name: Artifact
+      - name: Carica EXE come artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeAI_Pro_EXE
-          path: dist/KaraokeAI_Studio_Pro.exe
+          name: KaraokeAI_Studio_Windows
+          path: dist/KaraokeAI_Studio.exe
+          retention-days: 30
