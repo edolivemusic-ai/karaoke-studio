@@ -1,64 +1,50 @@
-name: Build KaraokeAI Studio EXE
+name: Build KaraokeAI Studio PRO
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout codice
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Installa Python 3.11
+      - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip'
 
-      - name: Installa dipendenze (CPU Optimized)
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install customtkinter openai-whisper pyinstaller pillow numpy tiktoken
 
-      - name: Scarica FFmpeg
+      - name: Fetch FFmpeg Binaries
         shell: pwsh
         run: |
-          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
-          Expand-Archive -Path ffmpeg.zip -DestinationPath temp_ffmpeg
-          $f = Get-ChildItem -Path "temp_ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          $p = Get-ChildItem -Path "temp_ffmpeg" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
-          Copy-Item $f.FullName -Destination "ffmpeg.exe"
-          Copy-Item $p.FullName -Destination "ffprobe.exe"
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
+          Expand-Archive ff.zip -DestinationPath temp
+          $bin = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $bin.FullName -Destination "ffmpeg.exe"
+          $prob = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          Copy-Item $prob.FullName -Destination "ffprobe.exe"
 
-      - name: Pre-scarica modello Whisper
-        run: |
-          python -c "import whisper; whisper.load_model('tiny', download_root='whisper_models')"
-
-      - name: Compila EXE
+      - name: PyInstaller Build
         shell: pwsh
         run: |
-          pyinstaller `
-            --noconfirm --onefile --windowed `
-            --name "KaraokeAI_Studio" `
+          pyinstaller --noconfirm --onefile --windowed `
+            --name "KaraokeAI_Studio_Pro" `
             --add-binary "ffmpeg.exe;." `
             --add-binary "ffprobe.exe;." `
-            --add-data "whisper_models;whisper_models" `
             --collect-all whisper `
             --collect-all customtkinter `
             --hidden-import "tiktoken_ext.openai_public" `
-            --hidden-import "tiktoken_ext" `
-            --exclude-module "matplotlib" `
-            --exclude-module "scipy" `
             main.py
 
-      - name: Carica EXE
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeAI_Studio_Windows
-          path: dist/KaraokeAI_Studio.exe
+          name: Windows_Executable
+          path: dist/KaraokeAI_Studio_Pro.exe
