@@ -482,23 +482,18 @@ class KaraokeApp(ctk.CTk):
             scaled_qr_size = int(qr_size * scale_factor)
 
             # Configurazione per evitare finestre di console su Windows
-            startupinfo = None
+            creationflags = 0
             if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0 # SW_HIDE
+                # CREATE_NO_WINDOW = 0x08000000
+                creationflags = 0x08000000
 
-            # Build gradient background video using ffmpeg lavfi
+            # Metodo veloce per il gradiente: crea due colori e usa lo scale con interpolazione
             stops=GRADIENTS.get(grad_name,[(80,0,160),(0,20,180)])
-            r1,g1,b1=stops[0]; r2,g2,b2=stops[1]
-
-            # Generate gradient frames via Python script → pipe to ffmpeg
-            # Use ffmpeg geq filter for gradient
-            # geq: r/g/b are functions of X,Y,W,H
-            # color1 at top, color2 at bottom
-            geq=(
-                f"r='({r1}+(({r2}-{r1})*Y/H))':g='({g1}+(({g2}-{g1})*Y/H))':b='({b1}+(({b2}-{b1})*Y/H))'"
-            )
+            c1 = f"0x{stops[0][0]:02x}{stops[0][1]:02x}{stops[0][2]:02x}"
+            c2 = f"0x{stops[1][0]:02x}{stops[1][1]:02x}{stops[1][2]:02x}"
+            
+            # Creiamo un'immagine 1x2 e la scaliamo alla risoluzione finale per un gradiente perfetto e istantaneo
+            fast_grad = f"color={c1}:s=1x1[top];color={c2}:s=1x1[bot];[top][bot]vstack,scale={width}:{height}:flags=bilinear"
 
             ass_path=self._build_ass(font_size,ass_color,width,height)
             ass_filter=_ass_filter(ass_path)
@@ -512,31 +507,33 @@ class KaraokeApp(ctk.CTk):
 
                 cmd=[
                     FFMPEG,"-y",
-                    "-f","lavfi","-i",f"color=black:s={width}x{height}:r=30:d={dur}",
+                    "-f","lavfi","-i",f"anullsrc=r=44100:cl=stereo", # Input dummy per sicurezza
                     "-i",self.audio_path,
                     "-i",qr_path,
                     "-filter_complex",
-                    f"[0:v]geq={geq}[bg];"
+                    f"{fast_grad}[bg];"
                     f"[2:v]scale={scaled_qr_size}:{scaled_qr_size}[qr];"
                     f"[bg][qr]overlay={x_expr.replace(str(qr_size), str(scaled_qr_size))}:{y_expr.replace(str(qr_size), str(scaled_qr_size))}[bgqr];"
-                    f"[bgqr]{ass_filter}[v]",
+                    f"[bgqr]{ass_filter},setsar=1[v]",
                     "-map","[v]","-map","1:a",
-                    "-c:v","libx264","-preset","fast","-crf","22",
-                    "-c:a","aac","-b:a","192k","-shortest",out_path
+                    "-t",str(dur),
+                    "-c:v","libx264","-preset","ultrafast","-crf","23",
+                    "-c:a","aac","-b:a","192k",out_path
                 ]
             else:
                 cmd=[
                     FFMPEG,"-y",
-                    "-f","lavfi","-i",f"color=black:s={width}x{height}:r=30:d={dur}",
+                    "-f","lavfi","-i",f"anullsrc=r=44100:cl=stereo",
                     "-i",self.audio_path,
                     "-filter_complex",
-                    f"[0:v]geq={geq}[bg];[bg]{ass_filter}[v]",
+                    f"{fast_grad}[bg];[bg]{ass_filter},setsar=1[v]",
                     "-map","[v]","-map","1:a",
-                    "-c:v","libx264","-preset","fast","-crf","22",
-                    "-c:a","aac","-b:a","192k","-shortest",out_path
+                    "-t",str(dur),
+                    "-c:v","libx264","-preset","ultrafast","-crf","23",
+                    "-c:a","aac","-b:a","192k",out_path
                 ]
 
-            proc=subprocess.run(cmd,capture_output=True,text=True,timeout=1800,startupinfo=startupinfo)
+            proc=subprocess.run(cmd,capture_output=True,text=True,timeout=1800,creationflags=creationflags)
             try:
                 os.unlink(ass_path)
             except OSError:
