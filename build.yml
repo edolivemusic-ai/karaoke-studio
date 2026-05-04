@@ -3,6 +3,7 @@ name: Build KaraokeAI Studio PRO
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -11,13 +12,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python Setup
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Installa Dipendenze
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
@@ -25,18 +25,19 @@ jobs:
       - name: Download FFmpeg & FFprobe
         shell: pwsh
         run: |
-          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
+          $u = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $u -OutFile ff.zip
           Expand-Archive ff.zip -DestinationPath temp
-          $ffmpeg = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          $ffprobe = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
-          Copy-Item $ffmpeg.FullName -Destination "ffmpeg.exe"
-          Copy-Item $ffprobe.FullName -Destination "ffprobe.exe"
+          $f = Get-ChildItem -Path "temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $p = Get-ChildItem -Path "temp" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+          Copy-Item $f.FullName -Destination "ffmpeg.exe"
+          Copy-Item $p.FullName -Destination "ffprobe.exe"
 
-      - name: Pre-Download Whisper Model
+      - name: Pre-Download Modello Whisper
         run: |
           python -c "import whisper; whisper.load_model('base', download_root='whisper_models')"
 
-      - name: Build EXE
+      - name: Build EXE Definitivo
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --windowed `
@@ -47,10 +48,11 @@ jobs:
             --collect-all whisper `
             --collect-all customtkinter `
             --hidden-import "tiktoken_ext.openai_public" `
+            --hidden-import "tiktoken_ext" `
             main.py
 
-      - name: Upload Artifact
+      - name: Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KaraokeAI_Studio_Pro
+          name: KaraokeAI_Pro_EXE
           path: dist/KaraokeAI_Studio_Pro.exe
