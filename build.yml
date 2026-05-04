@@ -5,9 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -20,36 +17,43 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
 
       - name: Installa dipendenze
         run: |
           python -m pip install --upgrade pip
-          pip install customtkinter
-          pip install openai-whisper
-          pip install pillow
-          pip install numpy
-          pip install pyinstaller
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # Installazione CPU-only per ridurre il peso dell'EXE
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install customtkinter openai-whisper pillow numpy pyinstaller tiktoken
 
-      - name: Compila EXE con PyInstaller
+      - name: Scarica FFmpeg
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath temp_ffmpeg
+          Get-ChildItem -Path "temp_ffmpeg" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1 | Copy-Item -Destination "ffmpeg.exe"
+          Get-ChildItem -Path "temp_ffmpeg" -Recurse -Filter "ffprobe.exe" | Select-Object -First 1 | Copy-Item -Destination "ffprobe.exe"
+
+      - name: Compila EXE
         run: |
           pyinstaller `
             --noconfirm `
             --onefile `
             --windowed `
             --name "KaraokeAI_Studio" `
-            --collect-data whisper `
-            --collect-data customtkinter `
+            --add-binary "ffmpeg.exe;." `
+            --add-binary "ffprobe.exe;." `
+            --collect-all whisper `
+            --collect-all customtkinter `
+            --collect-submodules torch `
+            --copy-metadata torch `
             --hidden-import whisper `
-            --hidden-import customtkinter `
-            --hidden-import torch `
-            --hidden-import numpy `
-            --hidden-import PIL `
+            --hidden-import PIL.ImageResampling `
             main.py
 
-      - name: Carica EXE come artifact
+      - name: Carica EXE
         uses: actions/upload-artifact@v4
         with:
           name: KaraokeAI_Studio_Windows
           path: dist/KaraokeAI_Studio.exe
-          retention-days: 30
